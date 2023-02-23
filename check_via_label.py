@@ -5,7 +5,52 @@ import csv
 import cv2
 import shutil
 from unicodedata import normalize
+import random
 import re
+from distutils.dir_util import copy_tree
+
+##################################################################
+# random 으로 짝 img, xml 뽑기
+##################################################################
+
+def extract_image_xml_pairs(img_dir, xml_dir, num_pairs, output_img_dir, output_xml_dir):
+    # Get the list of filenames in the img folder
+    img_filenames = list(set(os.listdir(img_dir)) - {'desktop.ini', 'whatever.ini'})
+
+    # Shuffle the list of filenames randomly
+    random.shuffle(img_filenames)
+
+    # Extract the specified number of image and XML file pairs
+    pairs = []
+    for i in range(num_pairs):
+        # Choose the next image filename in the shuffled list
+        random_img_filename = img_filenames[i]
+
+        # Create the corresponding xml filename
+        xml_filename = os.path.splitext(random_img_filename)[0] + ".xml"
+
+        # Define the paths to the selected image and xml files
+        selected_img_path = os.path.join(img_dir, random_img_filename)
+        selected_xml_path = os.path.join(xml_dir, xml_filename)
+
+        # Create the output folder if it does not exist
+        if not os.path.exists(output_img_dir):
+            os.makedirs(output_img_dir)
+        if not os.path.exists(output_xml_dir):
+            os.makedirs(output_xml_dir)
+        # Define the paths to the output image and xml files
+        output_img_path = os.path.join(output_img_dir, random_img_filename)
+        output_xml_path = os.path.join(output_xml_dir, xml_filename)
+
+        # Copy the selected image and xml files to the output directory
+        shutil.copy(selected_img_path, output_img_path)
+        shutil.copy(selected_xml_path, output_xml_path)
+
+        # Add the selected image and xml file paths to the list of pairs
+        pairs.append((output_img_path, output_xml_path))
+
+    return pairs
+
 
 
 ##################################################################
@@ -146,140 +191,204 @@ def crop_objects(images_folder, xml_folder, cropped_folder):
                 #tree.write(cropped_xml_path, encoding='utf8')
 
 
-##################################################################
-# bbox 좌상우하순으로 정렬
-# 숫자,글자 순으로 밖에 정렬 안됨
-# 한번돌리면 인코딩에러뜸...
-##################################################################
-def sort_bounding_boxes(xml_dir):
-    xml_files = [f for f in os.listdir(xml_dir) if f.endswith('.xml')]
-    for xml_file in xml_files:
-        xml_path = os.path.join(xml_dir, xml_file)
-        tree = ET.parse(xml_path)
-        root = tree.getroot()
-
-        # Find all bounding box elements
-        bboxes = []
-        for obj in root.iter("object"):
-            bndbox = obj.find("bndbox")
-            xmin = int(bndbox.find("xmin").text)
-            ymin = int(bndbox.find("ymin").text)
-            xmax = int(bndbox.find("xmax").text)
-            ymax = int(bndbox.find("ymax").text)
-            bboxes.append((xmin, ymin, xmax, ymax))
-
-        # Sort the bounding boxes based on top-left coordinate (xmin, ymin)
-        bboxes.sort(key=lambda x: (x[0], x[1]))
-
-        # Update the XML file with the sorted bounding boxes
-        for i, obj in enumerate(root.iter("object")):
-            bndbox = obj.find("bndbox")
-            bndbox.find("xmin").text = str(bboxes[i][0])
-            bndbox.find("ymin").text = str(bboxes[i][1])
-            bndbox.find("xmax").text = str(bboxes[i][2])
-            bndbox.find("ymax").text = str(bboxes[i][3])
-
-        tree.write(xml_path, encoding='utf8')
-
 
 ##################################################################
 # bbox 좌상우하순으로 name이랑 같이 정렬
+# !!! A_ 있으면 앞으로 빼기
 ##################################################################
-
 def sort_nameBybboxes(input_folder_path, output_folder_path):
-    # Create the output folder if it does not exist
     if not os.path.exists(output_folder_path):
         os.makedirs(output_folder_path)
 
-    # Process each XML file in the input folder
-    for filename in os.listdir(input_folder_path):
-        if not filename.endswith('.xml'):
-            continue
+    xml_files = [os.path.join(input_folder_path, f) for f in os.listdir(input_folder_path) if f.endswith('.xml')]
 
-        # Parse the XML file
-        input_file_path = os.path.join(input_folder_path, filename)
-        output_file_path = os.path.join(output_folder_path, filename)
-        tree = ET.parse(input_file_path)
+    for xml_file in xml_files:
+        tree = ET.parse(xml_file)
         root = tree.getroot()
 
-        # Extract the bounding boxes and names
         bboxes = []
         names = []
         for obj in root.findall('object'):
-            bbox = obj.find('bndbox')
-            xmin = int(bbox.find('xmin').text)
-            ymin = int(bbox.find('ymin').text)
-            xmax = int(bbox.find('xmax').text)
-            ymax = int(bbox.find('ymax').text)
-            bboxes.append((xmin, ymin, xmax, ymax))
-            names.append(obj.find('name').text)
+            bbox_elem = obj.find('bndbox')
+            bbox = (
+                int(bbox_elem.find('xmin').text),
+                int(bbox_elem.find('ymin').text),
+                int(bbox_elem.find('xmax').text),
+                int(bbox_elem.find('ymax').text)
+            )
+            name = obj.find('name').text
+            bboxes.append(bbox)
+            names.append(name)
 
-        # Sort the bounding boxes and names
-        sorted_bboxes = sorted(bboxes, key=lambda bbox: (bbox[0], bbox[1]))
-        sorted_names = [name for _, name in sorted(zip(bboxes, names), key=lambda pair: pair[0])]
+        bbox_names = [(bbox, name, 1 if not name.startswith("A") else 0) for bbox, name in zip(bboxes, names)]
+        #bbox_names.sort(key=lambda x: (x[2], x[0], x[1], x[3]))
+        bbox_names.sort(key=lambda x: (x[2], x[0], x[1]))
 
-        # Update the XML file with the sorted bounding boxes and names
-        for i, obj in enumerate(root.findall('object')):
-            bbox = obj.find('bndbox')
-            bbox.find('xmin').text = str(sorted_bboxes[i][0])
-            bbox.find('ymin').text = str(sorted_bboxes[i][1])
-            bbox.find('xmax').text = str(sorted_bboxes[i][2])
-            bbox.find('ymax').text = str(sorted_bboxes[i][3])
+        sorted_bboxes = [bbox_name[0] for bbox_name in bbox_names]
+        sorted_names = [bbox_name[1] for bbox_name in bbox_names]
+
+        i = 0
+        for obj in root.findall('object'):
+            bbox_elem = obj.find('bndbox')
+            bbox_elem.find('xmin').text = str(sorted_bboxes[i][0])
+            bbox_elem.find('ymin').text = str(sorted_bboxes[i][1])
+            bbox_elem.find('xmax').text = str(sorted_bboxes[i][2])
+            bbox_elem.find('ymax').text = str(sorted_bboxes[i][3])
             obj.find('name').text = sorted_names[i]
+            i += 1
 
-        # Write the updated XML file
-        tree.write(output_file_path, encoding='utf-8')
-
-    return
-
+        output_xml_file = os.path.join(output_folder_path, os.path.basename(xml_file))
+        tree.write(output_xml_file, encoding='utf8')
 
 
 ##################################################################
-# 좌상우하순으로 정렬된 bbox로 짝 xml, img 파일명 모두 바꾸기
-# N_, S_, A3_ 삭제 필요
+# xml 속 name순으로 짝 xml, img 파일명 모두 바꾸기
+# 변경된 파일명이 중복이면 뒤에 숫자 붙이기
 # Example usage: rename_xml_image_files('/path/to/xml/files')
 ##################################################################
 
+def rename_xml_image_files(xml_folder, images_folder, renamed_xml_folder, renamed_img_folder):
+    copy_tree(xml_folder, renamed_xml_folder)
+    copy_tree(images_folder, renamed_img_folder)
 
-def rename_xml_image_files(xml_folder, images_folder, renamed_folder):
-    os.makedirs(renamed_folder, exist_ok=True)
-    xml_files = [f for f in os.listdir(xml_folder) if f.endswith('.xml')]
+    xml_files = [f for f in os.listdir(renamed_xml_folder) if f.endswith('.xml')]
     for xml_file in xml_files:
         xml_path = os.path.join(xml_folder, xml_file)
         tree = ET.parse(xml_path)
         root = tree.getroot()
-        # extract the object name from the XML file
-        names = []
+        object_names = []
         for obj in root.findall('object'):
-            name = obj.find("name").text
-            if name != 'Plate':
-                names.append(obj.find('name').text)
+            name = obj.find('name').text
+            if name != "Plate": #Plate 제외
+                object_names.append(name)
+
+        old_xml_path = normalize('NFC', os.path.join(renamed_xml_folder, xml_file)) #한글깨짐방지
+        new_xml_name = normalize('NFC',"".join(object_names) + ".xml") #한글깨짐방지
+
+        # 중복 파일명 처리: 끝에 숫자 붙이기
+        if os.path.exists(os.path.join(renamed_xml_folder, new_xml_name)):
+            i = 1
+            while True:
+                numbered_xml_name = f"{new_xml_name[:-4]}_{i}.xml"
+                if not os.path.exists(os.path.join(renamed_xml_folder, numbered_xml_name)):
+                    new_xml_name = numbered_xml_name
+                    break
+                i += 1
+
+        os.rename(os.path.join(renamed_xml_folder, xml_file), os.path.join(renamed_xml_folder, new_xml_name))
+
+        img_files = [f for f in os.listdir(renamed_img_folder) if f.endswith('.jpg')]
+        old_img_path = normalize('NFC', os.path.join(renamed_img_folder, xml_file[:-4] + '.jpg'))
+        for img_file in img_files:
+            if old_img_path == os.path.join(renamed_img_folder, img_file[:-4] + '.jpg'):
+                new_img_file_path = os.path.join(renamed_img_folder, new_xml_name[:-4] + '.jpg')
+                os.rename(old_img_path, new_img_file_path)
+
+##################################################################
+# 이지네이머가 더 편리함,,!
+# Remove Target char 'A1~3_,S_,N_' from file name
+# extension: ".jpg" or ".xml"
+##################################################################
+def filename_remove_targetchar(folder_path,extension):
+    for filename in os.listdir(folder_path):
+        if filename.endswith(extension):
+            new_filename = re.sub('A3_|S_|N_', '',filename)
+            os.rename(os.path.join(folder_path, filename), os.path.join(folder_path, new_filename))
 
 
-            new_filename = renamed_folder + "/" + "-".join(names) + "_sorted.xml"
-            new_xml = normalize('NFC', new_filename) #한글깨짐방지
 
-            old_xml_file_path = os.path.join(xml_folder, xml_file)
-            old_xml = normalize('NFC',old_xml_file_path) #한글깨짐방지
+##################################################################
+# 폴더 속 이미지 평균 가로/세로 구하기
+# avg_width, avg_height = get_average_size('이미지 경로')
+# print(f"Average width: {avg_width}")
+# print(f"Average height: {avg_height}")
+##################################################################
+def get_average_img_size(img_folder_path):
+    total_width = 0
+    total_height = 0
+    num_images = 0
 
-            os.rename(old_xml, new_xml)
+    for filename in os.listdir(img_folder_path):
+        if filename.endswith('.jpg') or filename.endswith('.png'):
+            img_path = os.path.join(img_folder_path, filename)
 
-        image_file_path = os.path.join(images_folder, xml_file[:-4] + '.jpg')
-        if os.path.exists(image_file_path):
-            old_image_file_path = image_file_path
-            old_image = normalize('NFC', old_image_file_path) #한글깨짐방지
-            new_image_file_path = os.path.join(images_folder, xml_file[:-4] + '_sorted.jpg')
-            os.rename(old_image, new_image_file_path)
+            img = Image.open(img_path)
+            width, height = img.size
+            total_width += width
+            total_height += height
+            num_images += 1
+            print(img_path, width, height)
+
+    avg_width = total_width / num_images
+    avg_height = total_height / num_images
+
+    print(f"Average width: {avg_width}")
+    print(f"Average height: {avg_height}")
+    #return avg_width, avg_height
+
+
+##################################################################
+# Plate 평균 가로/세로 구하기
+# avg_width, avg_height = get_average_Plate_size('이미지 경로','xml 경로')
+# print(f"Average width: {avg_width}")
+# print(f"Average height: {avg_height}")
+##################################################################
+
+def get_average_Plate_size(xml_folder_path):
+    total_width = 0
+    total_height = 0
+    plate_count = 0
+
+    for filename in os.listdir(xml_folder_path):
+        if filename.endswith('.xml'):
+            xml_path = os.path.join(xml_folder_path, filename.split('.')[0] + '.xml')
+
+            if os.path.exists(xml_path):
+                tree = ET.parse(xml_path)
+                root = tree.getroot()
+
+                for obj in root.findall('object'):
+                    name = obj.find('name').text
+                    if name == 'Plate':
+                        bbox = obj.find('bndbox')
+                        xmin = int(bbox.find('xmin').text)
+                        ymin = int(bbox.find('ymin').text)
+                        xmax = int(bbox.find('xmax').text)
+                        ymax = int(bbox.find('ymax').text)
+                        width = xmax - xmin
+                        height = ymax - ymin
+                        total_width += width
+                        total_height += height
+                        plate_count += 1
+                        print(xml_path, width, height)
+
+    if plate_count > 0:
+        avg_width = total_width / plate_count
+        avg_height = total_height / plate_count
+
+        print(f"Average width: {avg_width}")
+        print(f"Average height: {avg_height}")
+
 
 
 
 if __name__ == '__main__':
-    # check_and_move_unpaired('E:/LPR_7차학습/Class_C2/Class_C2_3/images/src', 'E:/LPR_7차학습/Class_C2/Class_C2_3/labels/src', 'E:/LPR_7차학습/Class_C2/Class_C2_3/unpaired')
-    # check_and_fix_xml_sizes('E:/LPR_7차학습/Class_C2/Class_C2_3/images/src', 'E:/LPR_7차학습/Class_C2/Class_C2_3/labels/src')
+    #extract_image_xml_pairs('E:/PycharmProjects/yolo_data_util_enshin/Data/test/LPR_OCR/Class_E/images/전면', 'E:/PycharmProjects/yolo_data_util_enshin/Data/test/LPR_OCR/Class_E/labels/전면', 2000, 'E:/PycharmProjects/yolo_data_util_enshin/Data/test/LPR_OCR/random2000/Class_E/images/src', 'E:/PycharmProjects/yolo_data_util_enshin/Data/test/LPR_OCR/random2000/Class_E/labels/src')
+
+    #check_and_move_unpaired('E:/PycharmProjects/yolo_data_util_enshin/Data/test/LPR_OCR/Class_E/images/전면', 'E:/PycharmProjects/yolo_data_util_enshin/Data/test/LPR_OCR/Class_E/labels/전면', 'E:/PycharmProjects/yolo_data_util_enshin/Data/test/unpaired')
+
+    #check_and_fix_xml_sizes('E:/PycharmProjects/yolo_data_util_enshin/Data/test/images', 'E:/PycharmProjects/yolo_data_util_enshin/Data/test/labels')
+
     #crop_objects(images_folder='E:/PycharmProjects/yolo_data_util_enshin/Data/test/images', xml_folder='E:/PycharmProjects/yolo_data_util_enshin/Data/test/labels', cropped_folder='E:/PycharmProjects/yolo_data_util_enshin/Data/test/cropped')
-    #sort_bounding_boxes('E:/PycharmProjects/yolo_data_util_enshin/Data/test/labels')
-    #sort_nameBybboxes('E:/PycharmProjects/yolo_data_util_enshin/Data/test/labels', 'E:/PycharmProjects/yolo_data_util_enshin/Data/test/labels')
-    rename_xml_image_files('E:/PycharmProjects/yolo_data_util_enshin/Data/test/labels','E:/PycharmProjects/yolo_data_util_enshin/Data/test/images', 'E:/PycharmProjects/yolo_data_util_enshin/Data/test/renamed')
+
+    #sort_nameBybboxes('E:/PycharmProjects/yolo_data_util_enshin/Data/test/labels', 'E:/PycharmProjects/yolo_data_util_enshin/Data/test/renamed/labels')
+
+    #rename_xml_image_files('E:/PycharmProjects/yolo_data_util_enshin/Data/test/labels','E:/PycharmProjects/yolo_data_util_enshin/Data/test/images', 'E:/PycharmProjects/yolo_data_util_enshin/Data/test/renamed/labels', 'E:/PycharmProjects/yolo_data_util_enshin/Data/test/renamed/images')
+
+    #get_average_img_size('E:/RT_Projects/Data/LPR_Region_1/Class_Z/images/src')
+    get_average_Plate_size('E:/RT_Projects/Data/LPR_Region_1/Class_Z/labels/src')
+
+
 
 
 
