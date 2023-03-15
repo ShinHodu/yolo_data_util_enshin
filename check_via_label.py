@@ -8,6 +8,31 @@ from unicodedata import normalize
 import random
 import re
 from distutils.dir_util import copy_tree
+import numpy as np
+
+
+
+
+##################################################################
+# img, xml 구분해서 폴더에 따로 이동
+##################################################################
+def split_files_by_extension(folder_path, img_exts=(".jpg"), xml_exts=(".xml")):
+    # Create the output folders
+    img_folder = os.path.join(folder_path, "images/src")
+    os.makedirs(img_folder, exist_ok=True)
+    xml_folder = os.path.join(folder_path, "labels/src")
+    os.makedirs(xml_folder, exist_ok=True)
+
+
+    for filename in os.listdir(folder_path):
+        file_ext = os.path.splitext(filename)[1]
+        if file_ext.lower() in img_exts:
+            shutil.move(os.path.join(folder_path, filename), os.path.join(img_folder, filename))
+        elif file_ext.lower() in xml_exts:
+            shutil.move(os.path.join(folder_path, filename), os.path.join(xml_folder, filename))
+
+
+
 
 ##################################################################
 # random 으로 짝 img, xml 뽑기
@@ -50,6 +75,19 @@ def extract_image_xml_pairs(img_dir, xml_dir, num_pairs, output_img_dir, output_
         pairs.append((output_img_path, output_xml_path))
 
     return pairs
+
+##################################################################
+# 폴더 속에 타깃 문자가 있는 파일명을 가진 파일을 아웃풋 폴더로 이동
+# Example usage: extract_files_with_char('/path/to/source', '/path/to/destination', 'a')
+##################################################################
+
+def extract_files_with_char(source_dir, destination_dir, target_char):
+    for file_name in os.listdir(source_dir):
+        if target_char in file_name:
+            source_file_path = os.path.join(source_dir, file_name)
+            destination_file_path = os.path.join(destination_dir, file_name)
+            print(file_name)
+            shutil.move(source_file_path, destination_file_path)
 
 
 
@@ -162,17 +200,23 @@ def crop_objects(images_folder, xml_folder, cropped_folder):
         # check if file is an image
         if filename.endswith(".jpg") or filename.endswith(".png"):
             # read the image file
-            img = cv2.imread(os.path.join(images_folder, filename))
+            img_path = os.path.join(images_folder, filename)
+            #img = cv2.imread(os.path.join(images_folder, filename))
+            img = cv2.imdecode(np.fromfile(img_path, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+
             # get the corresponding XML file
             xml_file = os.path.splitext(filename)[0] + ".xml"
             xml_path = os.path.join(xml_folder, xml_file)
-            cropped_xml_path = os.path.join(cropped_folder, xml_file)
+            #cropped_xml_path = os.path.join(cropped_folder, xml_file)
+
             # read the XML file
             tree = ET.parse(xml_path)
             root = tree.getroot()
+
             # iterate through the objects in the XML file
             for obj in root.iter("object"):
                 class_name = obj.find("name").text
+
                 # create a folder for each object class
                 class_folder = os.path.join(cropped_folder, class_name)
                 if not os.path.exists(class_folder):
@@ -185,6 +229,7 @@ def crop_objects(images_folder, xml_folder, cropped_folder):
 
                 # crop the object from the image
                 cropped_obj = img[ymin:ymax, xmin:xmax]
+
                 # save the cropped object in the corresponding class folder
                 cropped_obj_path = os.path.join(class_folder, filename)
                 cv2.imwrite(cropped_obj_path, cropped_obj)
@@ -373,11 +418,15 @@ def get_average_Plate_size(xml_folder_path):
 
 
 if __name__ == '__main__':
-    #extract_image_xml_pairs('E:/PycharmProjects/yolo_data_util_enshin/Data/test/LPR_OCR/Class_E/images/전면', 'E:/PycharmProjects/yolo_data_util_enshin/Data/test/LPR_OCR/Class_E/labels/전면', 2000, 'E:/PycharmProjects/yolo_data_util_enshin/Data/test/LPR_OCR/random2000/Class_E/images/src', 'E:/PycharmProjects/yolo_data_util_enshin/Data/test/LPR_OCR/random2000/Class_E/labels/src')
+    split_files_by_extension('E:/RT_Projects/Data/서해대교_11월/11/OCR/2차 검수/Class_B/images', img_exts=(".jpg"), xml_exts=(".xml"))
 
-    #check_and_move_unpaired('E:/PycharmProjects/yolo_data_util_enshin/Data/test/LPR_OCR/Class_E/images/전면', 'E:/PycharmProjects/yolo_data_util_enshin/Data/test/LPR_OCR/Class_E/labels/전면', 'E:/PycharmProjects/yolo_data_util_enshin/Data/test/unpaired')
+    #extract_image_xml_pairs('E:/RT_Projects/Data/서해대교_11월/11/번호판영역/Class_C2/images/src', 'E:/RT_Projects/Data/서해대교_11월/11/번호판영역/Class_C2/labels/src', 558, 'E:/RT_Projects/Data/서해대교_11월/11/번호판영역/미사용데이터/Class_C2/images/src', 'E:/RT_Projects/Data/서해대교_11월/11/번호판영역/미사용데이터/Class_C2/labels/src')
 
-    #check_and_fix_xml_sizes('E:/PycharmProjects/yolo_data_util_enshin/Data/test/images', 'E:/PycharmProjects/yolo_data_util_enshin/Data/test/labels')
+    #extract_files_with_char('E:/RT_Projects/Data/서해대교_11월/11/OCR/2차 검수/Class_C1/Class_C1', 'E:/RT_Projects/Data/서해대교_11월/11/OCR/2차 검수/Class_C1/Class_C1_허', '허')
+
+    #check_and_move_unpaired('E:/RT_Projects/Data/서해대교_11월/11/OCR/2차 검수/Class_A/images', 'E:/RT_Projects/Data/서해대교_11월/11/OCR/2차 검수/Class_A/labels', 'E:/RT_Projects/Data/서해대교_11월/11/OCR')
+
+    #check_and_fix_xml_sizes('E:/RT_Projects/Data/서해대교_11월/11/번호판영역/Class_E/images/src', 'E:/RT_Projects/Data/서해대교_11월/11/번호판영역/Class_E/labels/src')
 
     #crop_objects(images_folder='E:/PycharmProjects/yolo_data_util_enshin/Data/test/images', xml_folder='E:/PycharmProjects/yolo_data_util_enshin/Data/test/labels', cropped_folder='E:/PycharmProjects/yolo_data_util_enshin/Data/test/cropped')
 
@@ -386,7 +435,7 @@ if __name__ == '__main__':
     #rename_xml_image_files('E:/PycharmProjects/yolo_data_util_enshin/Data/test/labels','E:/PycharmProjects/yolo_data_util_enshin/Data/test/images', 'E:/PycharmProjects/yolo_data_util_enshin/Data/test/renamed/labels', 'E:/PycharmProjects/yolo_data_util_enshin/Data/test/renamed/images')
 
     #get_average_img_size('E:/RT_Projects/Data/LPR_Region_1/Class_Z/images/src')
-    get_average_Plate_size('E:/RT_Projects/Data/LPR_Region_1/Class_Z/labels/src')
+    #get_average_Plate_size('E:/RT_Projects/Data/LPR_Region_1/Class_Z/labels/src')
 
 
 
